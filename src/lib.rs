@@ -131,7 +131,7 @@ impl<P: AsRef<Path>> Gitignore<P> {
         format!("{}{}", "**/", unformatted)
     }
 
-    pub fn includes(&mut self, glob: impl AsRef<Path>, target: impl AsRef<Path>) -> bool {
+    pub fn ignores(&mut self, glob: impl AsRef<Path>, target: impl AsRef<Path>) -> bool {
         let glob = Pattern::new(glob);
 
         let full_path = match (&glob.path_kind, &glob.match_type) {
@@ -164,33 +164,33 @@ mod tests {
         let cwd = std::env::current_dir().unwrap();
         let mut gitignore = Gitignore::default();
 
-        assert!(gitignore.includes("**/dist/*.js", cwd.join("build/dist/lib.js")));
-        assert!(gitignore.includes("/**/dist/*.js", cwd.join("build/dist/lib.js")));
-        assert!(gitignore.includes("/dist/**/*.js", cwd.join("dist/types/types.js")));
+        assert!(gitignore.ignores("**/dist/*.js", cwd.join("build/dist/lib.js")));
+        assert!(gitignore.ignores("/**/dist/*.js", cwd.join("build/dist/lib.js")));
+        assert!(gitignore.ignores("/dist/**/*.js", cwd.join("dist/types/types.js")));
 
-        assert!(gitignore.includes("/lib.js", cwd.join("lib.js")));
-        assert!(gitignore.includes("lib/*.js", cwd.join("lib/module.js")));
-        assert!(gitignore.includes("/lib/", cwd.join("lib/module.js")));
-        assert!(gitignore.includes("lib/", cwd.join("lib/module.js")));
-        assert!(gitignore.includes("lib/", cwd.join("dist/lib/module.js")));
-        assert!(gitignore.includes("lib/", cwd.join("lib/nested/module.js")));
-        assert!(gitignore.includes("lib", cwd.join("lib/nested/module.js")));
-        assert!(gitignore.includes("lib", cwd.join("lib")));
-        assert!(gitignore.includes("lib", cwd.join("lib/module.js")));
+        assert!(gitignore.ignores("/lib.js", cwd.join("lib.js")));
+        assert!(gitignore.ignores("lib/*.js", cwd.join("lib/module.js")));
+        assert!(gitignore.ignores("/lib/", cwd.join("lib/module.js")));
+        assert!(gitignore.ignores("lib/", cwd.join("lib/module.js")));
+        assert!(gitignore.ignores("lib/", cwd.join("dist/lib/module.js")));
+        assert!(gitignore.ignores("lib/", cwd.join("lib/nested/module.js")));
+        assert!(gitignore.ignores("lib", cwd.join("lib/nested/module.js")));
+        assert!(gitignore.ignores("lib", cwd.join("lib")));
+        assert!(gitignore.ignores("lib", cwd.join("lib/module.js")));
 
-        assert!(gitignore.includes("remove-*", cwd.join("remove-items.js")));
-        assert!(gitignore.includes("/*.js", cwd.join("module.js")));
-        assert!(gitignore.includes("!/lib.js", cwd.join("lib/lib.js")));
-        assert!(gitignore.includes("!lib/*.js", cwd.join("dist/lib/module.js")));
-        assert!(gitignore.includes("*.js", cwd.join("dist/module.js")));
-        assert!(gitignore.includes("*.js", cwd.join("module.js")));
+        assert!(gitignore.ignores("remove-*", cwd.join("remove-items.js")));
+        assert!(gitignore.ignores("/*.js", cwd.join("module.js")));
+        assert!(gitignore.ignores("!/lib.js", cwd.join("lib/lib.js")));
+        assert!(gitignore.ignores("!lib/*.js", cwd.join("dist/lib/module.js")));
+        assert!(gitignore.ignores("*.js", cwd.join("dist/module.js")));
+        assert!(gitignore.ignores("*.js", cwd.join("module.js")));
 
-        assert!(!gitignore.includes("!/*.js", cwd.join("module.js")));
-        assert!(!gitignore.includes("/lib.js", cwd.join("lib/lib.js")));
-        assert!(!gitignore.includes("/dist/*.js", cwd.join("dist/types/types.js")));
-        assert!(!gitignore.includes("lib/*.js", cwd.join("dist/lib/module.js")));
-        assert!(!gitignore.includes("dist/lib/", cwd.join("parent/dist/lib/module.js")));
-        assert!(!gitignore.includes("!lib/", cwd.join("dist/lib/module.js")));
-        assert!(!gitignore.includes("!lib", cwd.join("dist/lib/module.js")));
+        assert!(!gitignore.ignores("!/*.js", cwd.join("module.js")));
+        assert!(!gitignore.ignores("/lib.js", cwd.join("lib/lib.js")));
+        assert!(!gitignore.ignores("/dist/*.js", cwd.join("dist/types/types.js")));
+        assert!(!gitignore.ignores("lib/*.js", cwd.join("dist/lib/module.js")));
+        assert!(!gitignore.ignores("dist/lib/", cwd.join("parent/dist/lib/module.js")));
+        assert!(!gitignore.ignores("!lib/", cwd.join("dist/lib/module.js")));
+        assert!(!gitignore.ignores("!lib", cwd.join("dist/lib/module.js")));
     }
 }
