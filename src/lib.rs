@@ -161,7 +161,6 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let cwd = std::env::current_dir().unwrap();
         let mut gitignore = Gitignore::default();
 
         assert!(gitignore.ignores("**/dist/*.js", gitignore.root.join("build/dist/lib.js")));
