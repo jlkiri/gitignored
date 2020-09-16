@@ -29,6 +29,7 @@ enum Extension {
 enum PathKind {
     Directory,
     File,
+    Both,
 }
 
 pub struct Pattern {
@@ -59,10 +60,15 @@ impl Pattern {
         } else {
             Extension::Undefined
         };
-        let path_kind = if normalized_glob.ends_with("/") {
-            PathKind::Directory
-        } else {
-            PathKind::File
+        let path_kind = match extension_type {
+            Extension::Defined => PathKind::File,
+            Extension::Undefined => {
+                if normalized_glob.ends_with("/") {
+                    PathKind::Directory
+                } else {
+                    PathKind::Both
+                }
+            }
         };
 
         Self {
@@ -83,7 +89,7 @@ pub struct Gitignore<P: AsRef<Path>> {
 impl Default for Gitignore<PathBuf> {
     fn default() -> Self {
         let mut options = MatchOptions::new();
-        options.require_literal_separator = true;
+        options.require_literal_separator = false;
 
         Self {
             root: env::current_dir().unwrap(),
@@ -97,7 +103,9 @@ impl<P: AsRef<Path>> Gitignore<P> {
         Gitignore { root, options }
     }
 
-    fn make_absolute(&self, p: &str) -> String {
+    fn make_absolute(&mut self, p: &str) -> String {
+        self.options.require_literal_separator = true;
+
         let root_str = self.root.as_ref().display();
 
         if p.starts_with("**/") {
@@ -111,18 +119,28 @@ impl<P: AsRef<Path>> Gitignore<P> {
         format!("{}/{}", root_str, p)
     }
 
-    fn make_absolute_anywhere(&self, p: &str) -> String {
-        format!("{}{}", "**/", p)
+    fn make_absolute_anywhere(&mut self, p: &str) -> String {
+        self.options.require_literal_separator = false;
+
+        let mut unformatted = p;
+
+        if unformatted.ends_with("*") {
+            unformatted = &p[..p.len() - 1];
+        }
+
+        format!("{}{}", "**/", unformatted)
     }
 
-    pub fn includes(&self, glob: impl AsRef<Path>, target: impl AsRef<Path>) -> bool {
+    pub fn includes(&mut self, glob: impl AsRef<Path>, target: impl AsRef<Path>) -> bool {
         let glob = Pattern::new(glob);
 
         let full_path = match (&glob.path_kind, &glob.match_type) {
+            (PathKind::Both, Match::Anywhere) => self.make_absolute_anywhere(&glob.string) + "*",
             (PathKind::File, Match::Anywhere) => self.make_absolute_anywhere(&glob.string),
             (PathKind::Directory, Match::Anywhere) => {
                 self.make_absolute_anywhere(&glob.string) + "**/*"
             }
+            (PathKind::Both, Match::Relative) => self.make_absolute(&glob.string) + "*",
             (PathKind::File, Match::Relative) => self.make_absolute(&glob.string),
             (PathKind::Directory, Match::Relative) => self.make_absolute(&glob.string) + "**/*",
         };
@@ -144,16 +162,22 @@ mod tests {
     #[test]
     fn it_works() {
         let cwd = std::env::current_dir().unwrap();
-        let gitignore = Gitignore::default();
+        let mut gitignore = Gitignore::default();
 
         assert!(gitignore.includes("**/dist/*.js", cwd.join("build/dist/lib.js")));
+        assert!(gitignore.includes("/**/dist/*.js", cwd.join("build/dist/lib.js")));
         assert!(gitignore.includes("/dist/**/*.js", cwd.join("dist/types/types.js")));
+
         assert!(gitignore.includes("/lib.js", cwd.join("lib.js")));
         assert!(gitignore.includes("lib/*.js", cwd.join("lib/module.js")));
         assert!(gitignore.includes("/lib/", cwd.join("lib/module.js")));
         assert!(gitignore.includes("lib/", cwd.join("lib/module.js")));
         assert!(gitignore.includes("lib/", cwd.join("dist/lib/module.js")));
         assert!(gitignore.includes("lib/", cwd.join("lib/nested/module.js")));
+        assert!(gitignore.includes("lib", cwd.join("lib/nested/module.js")));
+        assert!(gitignore.includes("lib", cwd.join("lib")));
+        assert!(gitignore.includes("lib", cwd.join("lib/module.js")));
+
         assert!(gitignore.includes("remove-*", cwd.join("remove-items.js")));
         assert!(gitignore.includes("/*.js", cwd.join("module.js")));
         assert!(gitignore.includes("!/lib.js", cwd.join("lib/lib.js")));
@@ -165,7 +189,8 @@ mod tests {
         assert!(!gitignore.includes("/lib.js", cwd.join("lib/lib.js")));
         assert!(!gitignore.includes("/dist/*.js", cwd.join("dist/types/types.js")));
         assert!(!gitignore.includes("lib/*.js", cwd.join("dist/lib/module.js")));
-        assert!(!gitignore.includes("lib", cwd.join("lib/module.js")));
         assert!(!gitignore.includes("dist/lib/", cwd.join("parent/dist/lib/module.js")));
+        assert!(!gitignore.includes("!lib/", cwd.join("dist/lib/module.js")));
+        assert!(!gitignore.includes("!lib", cwd.join("dist/lib/module.js")));
     }
 }
