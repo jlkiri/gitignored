@@ -7,21 +7,15 @@ fn first_char(string: &str) -> char {
     string.chars().nth(0).unwrap()
 }
 
-fn first_segment<'a, P: AsRef<Path>>(path: &'a P) -> &'a str {
-    let str_path = path.as_ref().to_str().unwrap();
-    let _path = match first_char(str_path) {
-        '/' => &str_path[1..],
-        _ => str_path,
-    };
-
-    let segments: Vec<&str> = _path.split("/").collect();
-
-    segments.first().unwrap()
+fn has_no_middle_separators(string: &str) -> bool {
+    let segments: Vec<&str> = string.split("/").collect();
+    let non_empty: Vec<&str> = segments.iter().filter(|s| !s.is_empty()).copied().collect();
+    non_empty.len() <= 1
 }
 
 #[derive(Debug)]
-enum Filepath {
-    Absolute,
+enum Match {
+    Anywhere,
     Relative,
 }
 
@@ -39,7 +33,7 @@ enum PathKind {
 
 pub struct Pattern {
     pub string: String,
-    path_type: Filepath,
+    match_type: Match,
     extension_type: Extension,
     path_kind: PathKind,
     negated: bool,
@@ -52,11 +46,13 @@ impl Pattern {
         let negated = glob.starts_with("!");
         let normalized_glob = if negated { &glob[1..] } else { glob };
 
-        let path_type = if !normalized_glob.starts_with("**") && first_char(normalized_glob) != '/'
+        let match_type = if !normalized_glob.starts_with("**")
+            && first_char(normalized_glob) != '/'
+            && has_no_middle_separators(normalized_glob)
         {
-            Filepath::Relative
+            Match::Anywhere
         } else {
-            Filepath::Absolute
+            Match::Relative
         };
         let extension_type = if has_extension.is_match(normalized_glob) {
             Extension::Defined
@@ -72,7 +68,7 @@ impl Pattern {
         Self {
             string: String::from(normalized_glob),
             negated,
-            path_type,
+            match_type,
             extension_type,
             path_kind,
         }
@@ -101,7 +97,7 @@ impl<P: AsRef<Path>> Gitignore<P> {
         Gitignore { root, options }
     }
 
-    fn prepend_root(&self, p: &str) -> String {
+    fn make_absolute(&self, p: &str) -> String {
         let root_str = self.root.as_ref().display();
 
         if p.starts_with("**/") {
@@ -112,31 +108,26 @@ impl<P: AsRef<Path>> Gitignore<P> {
             return format!("{}{}", root_str, p);
         }
 
+        format!("{}/{}", root_str, p)
+    }
+
+    fn make_absolute_anywhere(&self, p: &str) -> String {
         format!("{}{}", "**/", p)
     }
 
     pub fn includes(&self, glob: impl AsRef<Path>, target: impl AsRef<Path>) -> bool {
         let glob = Pattern::new(glob);
-        let glob_dir = first_segment(&glob.string);
-        let unprefixed = target.as_ref().strip_prefix(&self.root).unwrap();
-        let target_dir = first_segment(&unprefixed);
 
-        let full_path = match glob.path_kind {
-            PathKind::File => self.prepend_root(&glob.string),
-            PathKind::Directory => self.prepend_root(&glob.string) + "**/*",
-        };
-        let matcher = PatternMatcher::new(&full_path).unwrap();
-
-        if let Extension::Defined = glob.extension_type {
-            if let Filepath::Relative = glob.path_type {
-                if glob_dir != target_dir {
-                    if glob.negated {
-                        return true;
-                    }
-                    return false;
-                }
+        let full_path = match (&glob.path_kind, &glob.match_type) {
+            (PathKind::File, Match::Anywhere) => self.make_absolute_anywhere(&glob.string),
+            (PathKind::Directory, Match::Anywhere) => {
+                self.make_absolute_anywhere(&glob.string) + "**/*"
             }
-        }
+            (PathKind::File, Match::Relative) => self.make_absolute(&glob.string),
+            (PathKind::Directory, Match::Relative) => self.make_absolute(&glob.string) + "**/*",
+        };
+
+        let matcher = PatternMatcher::new(&full_path).unwrap();
 
         if glob.negated {
             !matcher.matches_path_with(target.as_ref(), self.options)
@@ -167,13 +158,14 @@ mod tests {
         assert!(gitignore.includes("/*.js", cwd.join("module.js")));
         assert!(gitignore.includes("!/lib.js", cwd.join("lib/lib.js")));
         assert!(gitignore.includes("!lib/*.js", cwd.join("dist/lib/module.js")));
+        assert!(gitignore.includes("*.js", cwd.join("dist/module.js")));
+        assert!(gitignore.includes("*.js", cwd.join("module.js")));
 
         assert!(!gitignore.includes("!/*.js", cwd.join("module.js")));
         assert!(!gitignore.includes("/lib.js", cwd.join("lib/lib.js")));
         assert!(!gitignore.includes("/dist/*.js", cwd.join("dist/types/types.js")));
         assert!(!gitignore.includes("lib/*.js", cwd.join("dist/lib/module.js")));
-        assert!(!gitignore.includes("*.js", cwd.join("dist/module.js")));
-        assert!(!gitignore.includes("*.js", cwd.join("module.js")));
         assert!(!gitignore.includes("lib", cwd.join("lib/module.js")));
+        assert!(!gitignore.includes("dist/lib/", cwd.join("parent/dist/lib/module.js")));
     }
 }
