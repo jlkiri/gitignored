@@ -96,7 +96,12 @@ impl Pattern {
         while segments.len() > 1 {
             let mut joined = segments[..segments.len() - 1].join("/");
             joined.push_str("/");
-            parents.push(joined);
+            if joined.starts_with("/") {
+                parents.push(joined);
+            } else {
+                parents.push(format!("/{}", joined));
+                parents.push(joined);
+            }
             segments.pop();
         }
 
@@ -155,7 +160,7 @@ impl<P: AsRef<Path>> Gitignore<P> {
     }
 
     pub fn ignores_path(&mut self, glob: Pattern, target: impl AsRef<Path>) -> bool {
-        let full_path = self.make_full_path(&glob);
+        let full_path = self.make_full_path(&glob, &glob.string);
 
         let matcher = PatternMatcher::new(&full_path).unwrap();
 
@@ -166,59 +171,42 @@ impl<P: AsRef<Path>> Gitignore<P> {
         }
     }
 
-    fn make_full_path(&mut self, glob: &Pattern) -> String {
+    fn make_full_path<A: AsRef<Path>>(&mut self, glob: &Pattern, from: A) -> String {
+        let from_string = from.as_ref().to_str().unwrap();
         match (&glob.path_kind, &glob.match_type) {
-            (PathKind::Both, Match::Anywhere) => self.make_absolute_anywhere(&glob.string) + "*",
-            (PathKind::File, Match::Anywhere) => self.make_absolute_anywhere(&glob.string),
-            (PathKind::Dir, Match::Anywhere) => self.make_absolute_anywhere(&glob.string) + "**/*",
-            (PathKind::Both, Match::Relative) => self.make_absolute(&glob.string) + "*",
-            (PathKind::File, Match::Relative) => self.make_absolute(&glob.string),
-            (PathKind::Dir, Match::Relative) => self.make_absolute(&glob.string) + "**/*",
+            (PathKind::Both, Match::Anywhere) => self.make_absolute_anywhere(from_string) + "*",
+            (PathKind::File, Match::Anywhere) => self.make_absolute_anywhere(from_string),
+            (PathKind::Dir, Match::Anywhere) => self.make_absolute_anywhere(from_string) + "**/*",
+            (PathKind::Both, Match::Relative) => self.make_absolute(from_string) + "*",
+            (PathKind::File, Match::Relative) => self.make_absolute(from_string),
+            (PathKind::Dir, Match::Relative) => self.make_absolute(from_string) + "**/*",
         }
     }
 
-    pub fn ignores(&mut self, lines: &[&str], target: impl AsRef<Path>) -> bool {
+    fn find_ignored_dirs(&self, lines: &[&str]) -> Vec<String> {
         let mut ignored_dirs: Vec<String> = Vec::new();
 
         for line in lines.iter() {
             let glob = Pattern::new(line);
-            let Pattern {
-                path_kind,
-                match_type,
-                ..
-            } = &glob;
-
             let parents: Vec<String> = glob.get_parents().into_iter().map(|p| negate(&p)).collect();
-
-            // TODO: make this not so hacky?
-            let relative_parents: Vec<String> = glob
-                .get_parents()
-                .into_iter()
-                .map(|p| negate(&format!("/{}", p)[..]))
-                .collect();
-
-            let contains_negated_parents = parents.iter().any(|p| lines.contains(&&p[..]));
-            let contains_negated_relative_parents =
-                relative_parents.iter().any(|p| lines.contains(&&p[..]));
+            let has_negated_parents = parents.iter().any(|p| lines.contains(&&p[..]));
 
             // Disallow re-include by negation if parent dir is ignored unless the same parent is negated, with or without /
-            match (path_kind, match_type) {
-                (PathKind::Both, Match::Anywhere) | (PathKind::Dir, Match::Anywhere) => {
-                    if !glob.negated
-                        && !contains_negated_parents
-                        && !contains_negated_relative_parents
-                    {
-                        ignored_dirs.push(glob.string.clone());
-                    }
-                }
-                (PathKind::Both, Match::Relative) | (PathKind::Dir, Match::Relative) => {
-                    if !glob.negated && !contains_negated_parents {
-                        ignored_dirs.push(glob.string.clone());
+            match glob.path_kind {
+                PathKind::Both | PathKind::Dir => {
+                    if !glob.negated && !has_negated_parents {
+                        ignored_dirs.push(glob.string);
                     }
                 }
                 _ => (),
             }
         }
+
+        ignored_dirs
+    }
+
+    pub fn ignores(&mut self, lines: &[&str], target: impl AsRef<Path>) -> bool {
+        let ignored_dirs = self.find_ignored_dirs(lines);
 
         let mut is_ignored = false;
 
@@ -226,21 +214,12 @@ impl<P: AsRef<Path>> Gitignore<P> {
             let glob = Pattern::new(line);
 
             let has_ignored_parent = ignored_dirs.iter().any(|dir| {
-                let s = match (&glob.path_kind, &glob.match_type) {
-                    (PathKind::Both, Match::Anywhere) => self.make_absolute_anywhere(dir) + "*",
-                    (PathKind::File, Match::Anywhere) => self.make_absolute_anywhere(dir),
-                    (PathKind::Dir, Match::Anywhere) => self.make_absolute_anywhere(dir) + "**/*",
-                    (PathKind::Both, Match::Relative) => self.make_absolute(dir) + "*",
-                    (PathKind::File, Match::Relative) => self.make_absolute(dir),
-                    (PathKind::Dir, Match::Relative) => self.make_absolute(dir) + "**/*",
-                };
-
-                let path = target.as_ref().display().to_string();
-
-                let matcher = PatternMatcher::new(&s).unwrap();
-                matcher.matches(&path)
+                let long_glob = self.make_full_path(&glob, dir);
+                let matcher = PatternMatcher::new(&long_glob).unwrap();
+                matcher.matches_path(target.as_ref())
             });
 
+            // Early return because nothing can re-include it
             if has_ignored_parent {
                 return true;
             }
@@ -343,5 +322,7 @@ mod tests {
         assert!(!ig.ignores(&l, ig.root.join("lib/include.js")));
         assert!(!ig.ignores(&m, ig.root.join("lib/include.js")));
         assert!(!ig.ignores(&n, ig.root.join("lib/include.js")));
+
+        assert!(ig.ignores(&d, ig.root.join("lib/deep/ignored.js")));
     }
 }
