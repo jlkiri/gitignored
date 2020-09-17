@@ -7,15 +7,28 @@ fn first_char(string: &str) -> char {
     string.chars().nth(0).unwrap()
 }
 
-fn has_no_middle_separators(string: &str) -> bool {
-    let segments: Vec<&str> = string.split("/").collect();
-    let non_empty: Vec<&str> = segments.iter().filter(|s| !s.is_empty()).copied().collect();
-    non_empty.len() <= 1
+fn negate(string: &str) -> String {
+    format!("!{}", string)
 }
 
-fn first_segment(string: &str) -> &str {
-    let segments: Vec<&str> = string.split("/").collect();
-    segments.first().unwrap()
+fn has_no_middle_separators(string: &str) -> bool {
+    let segments: Vec<&str> = string.split("/").filter(|s| !s.is_empty()).collect();
+    segments.len() <= 1
+}
+
+fn first_segment(string: &str) -> String {
+    let normalized = if string.starts_with("/") {
+        &string[1..]
+    } else {
+        string
+    };
+    let segments: Vec<&str> = normalized.split("/").collect();
+
+    String::from(*segments.first().unwrap())
+}
+
+fn remove_whitespace(s: &str) -> String {
+    s.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
 #[derive(Debug)]
@@ -50,18 +63,19 @@ impl Pattern {
         let has_extension = Regex::new(r"\*\.[^\*]+$").unwrap();
         let glob = glob.as_ref().to_str().unwrap_or("");
         let negated = glob.starts_with("!");
-        let normalized_glob = if negated { &glob[1..] } else { glob };
+        let without_neg = if negated { &glob[1..] } else { glob };
+        let normalized_glob = remove_whitespace(without_neg);
 
         let match_type = if !normalized_glob.starts_with("**")
-            && first_char(normalized_glob) != '/'
-            && has_no_middle_separators(normalized_glob)
+            && first_char(&normalized_glob) != '/'
+            && has_no_middle_separators(&normalized_glob)
         {
             Match::Anywhere
         } else {
             Match::Relative
         };
 
-        let extension_type = if has_extension.is_match(normalized_glob) {
+        let extension_type = if has_extension.is_match(&normalized_glob) {
             Extension::Defined
         } else {
             Extension::Undefined
@@ -157,39 +171,45 @@ impl<P: AsRef<Path>> Gitignore<P> {
         }
     }
 
-    pub fn ignores(&mut self, text: &str, target: impl AsRef<Path>) -> bool {
-        let lines: Vec<&str> = text.lines().collect();
-
+    pub fn ignores(&mut self, lines: Vec<&str>, target: impl AsRef<Path>) -> bool {
         let mut ignored_dirs: Vec<String> = Vec::new();
 
-        for line in &lines {
+        for line in lines.iter() {
             let glob = Pattern::new(line);
             let Pattern {
                 path_kind,
                 match_type,
+                string,
                 ..
             } = &glob;
 
-            if !glob.negated {
-                match (path_kind, match_type) {
-                    (PathKind::Both, Match::Anywhere) | (PathKind::Dir, Match::Anywhere) => {
-                        println!("{}", first_segment(&glob.string));
-                        ignored_dirs.push(String::from(first_segment(&glob.string)));
+            match (path_kind, match_type) {
+                (PathKind::Both, Match::Anywhere) | (PathKind::Dir, Match::Anywhere) => {
+                    let neg = &negate(&glob.string)[..];
+                    let neg_with_root = &negate(&format!("/{}", &glob.string))[..];
+
+                    if !glob.negated && !lines.contains(&neg) && !lines.contains(&neg_with_root) {
+                        ignored_dirs.push(first_segment(string));
                     }
-                    _ => (),
                 }
+                _ => (),
             }
         }
 
         let mut is_ignored = false;
 
-        for line in &lines {
+        for line in lines.iter() {
             let glob = Pattern::new(line);
-            if !glob.negated
-                && ignored_dirs.contains(&String::from(first_segment(
-                    target.as_ref().to_str().unwrap(),
-                )))
-            {
+
+            let unprefixed = target
+                .as_ref()
+                .strip_prefix(&self.root)
+                .expect("Target must be an absolute path!");
+
+            let has_ignored_parent =
+                ignored_dirs.contains(&first_segment(unprefixed.to_str().unwrap()));
+
+            if !glob.negated && has_ignored_parent {
                 is_ignored = true;
                 break;
             } else {
@@ -206,39 +226,76 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_works() {
-        let mut gitignore = Gitignore::default();
+    fn single_line() {
+        let mut ig = Gitignore::default();
 
-        assert!(gitignore.ignores("**/dist/*.js", gitignore.root.join("build/dist/lib.js")));
-        assert!(gitignore.ignores("/**/dist/*.js", gitignore.root.join("build/dist/lib.js")));
-        assert!(gitignore.ignores("/dist/**/*.js", gitignore.root.join("dist/types/types.js")));
-
-        assert!(gitignore.ignores("/lib.js", gitignore.root.join("lib.js")));
-        assert!(gitignore.ignores("lib/*.js", gitignore.root.join("lib/module.js")));
-        assert!(gitignore.ignores("/lib/", gitignore.root.join("lib/module.js")));
-        assert!(gitignore.ignores("lib/", gitignore.root.join("lib/module.js")));
-        assert!(gitignore.ignores("lib/", gitignore.root.join("dist/lib/module.js")));
-        assert!(gitignore.ignores("lib/", gitignore.root.join("lib/nested/module.js")));
-        assert!(gitignore.ignores("lib", gitignore.root.join("lib/nested/module.js")));
-        assert!(gitignore.ignores("lib", gitignore.root.join("lib")));
-        assert!(gitignore.ignores("lib", gitignore.root.join("lib/module.js")));
-
-        assert!(gitignore.ignores("remove-*", gitignore.root.join("remove-items.js")));
-        assert!(gitignore.ignores("/*.js", gitignore.root.join("module.js")));
-        assert!(gitignore.ignores("!/lib.js", gitignore.root.join("lib/lib.js")));
-        assert!(gitignore.ignores("!lib/*.js", gitignore.root.join("dist/lib/module.js")));
-        assert!(gitignore.ignores("*.js", gitignore.root.join("dist/module.js")));
-        assert!(gitignore.ignores("*.js", gitignore.root.join("module.js")));
-
-        assert!(!gitignore.ignores("!/*.js", gitignore.root.join("module.js")));
-        assert!(!gitignore.ignores("/lib.js", gitignore.root.join("lib/lib.js")));
-        assert!(!gitignore.ignores("/dist/*.js", gitignore.root.join("dist/types/types.js")));
-        assert!(!gitignore.ignores("lib/*.js", gitignore.root.join("dist/lib/module.js")));
-        assert!(!gitignore.ignores(
-            "dist/lib/",
-            gitignore.root.join("parent/dist/lib/module.js")
+        assert!(ig.ignores_path(
+            Pattern::new("**/dist/*.js"),
+            ig.root.join("build/dist/lib.js")
         ));
-        assert!(!gitignore.ignores("!lib/", gitignore.root.join("dist/lib/module.js")));
-        assert!(!gitignore.ignores("!lib", gitignore.root.join("dist/lib/module.js")));
+        assert!(ig.ignores_path(
+            Pattern::new("/**/dist/*.js"),
+            ig.root.join("build/dist/lib.js")
+        ));
+        assert!(ig.ignores_path(
+            Pattern::new("/dist/**/*.js"),
+            ig.root.join("dist/types/types.js")
+        ));
+
+        assert!(ig.ignores_path(Pattern::new("/lib.js"), ig.root.join("lib.js")));
+        assert!(ig.ignores_path(Pattern::new("lib/*.js"), ig.root.join("lib/module.js")));
+        assert!(ig.ignores_path(Pattern::new("/lib/"), ig.root.join("lib/module.js")));
+        assert!(ig.ignores_path(Pattern::new("lib/"), ig.root.join("lib/module.js")));
+        assert!(ig.ignores_path(Pattern::new("lib/"), ig.root.join("dist/lib/module.js")));
+        assert!(ig.ignores_path(Pattern::new("lib/"), ig.root.join("lib/nested/module.js")));
+        assert!(ig.ignores_path(Pattern::new("lib"), ig.root.join("lib/nested/module.js")));
+        assert!(ig.ignores_path(Pattern::new("lib"), ig.root.join("lib")));
+        assert!(ig.ignores_path(Pattern::new("lib"), ig.root.join("lib/module.js")));
+
+        assert!(ig.ignores_path(Pattern::new("remove-*"), ig.root.join("remove-items.js")));
+        assert!(ig.ignores_path(Pattern::new("/*.js"), ig.root.join("module.js")));
+        assert!(ig.ignores_path(Pattern::new("!/lib.js"), ig.root.join("lib/lib.js")));
+        assert!(ig.ignores_path(
+            Pattern::new("!lib/*.js"),
+            ig.root.join("dist/lib/module.js")
+        ));
+        assert!(ig.ignores_path(Pattern::new("*.js"), ig.root.join("dist/module.js")));
+        assert!(ig.ignores_path(Pattern::new("*.js"), ig.root.join("module.js")));
+
+        assert!(!ig.ignores_path(Pattern::new("!/*.js"), ig.root.join("module.js")));
+        assert!(!ig.ignores_path(Pattern::new("/lib.js"), ig.root.join("lib/lib.js")));
+        assert!(!ig.ignores_path(
+            Pattern::new("/dist/*.js"),
+            ig.root.join("dist/types/types.js")
+        ));
+        assert!(!ig.ignores_path(Pattern::new("lib/*.js"), ig.root.join("dist/lib/module.js")));
+        assert!(!ig.ignores_path(
+            Pattern::new("dist/lib/"),
+            ig.root.join("parent/dist/lib/module.js")
+        ));
+        assert!(!ig.ignores_path(Pattern::new("!lib/"), ig.root.join("dist/lib/module.js")));
+        assert!(!ig.ignores_path(Pattern::new("!lib"), ig.root.join("dist/lib/module.js")));
+    }
+
+    #[test]
+    fn multiple_lines() {
+        let mut ig = Gitignore::default();
+
+        let a = vec!["lib/", "!lib/*.js"];
+        let b = vec!["lib", "!lib/*.js"];
+        let c = vec!["!lib/*.js", "lib"];
+
+        let i = vec!["lib/*.js", "!lib/include.js"];
+        let j = vec!["lib/*.js", "!lib/"];
+        let k = vec!["lib/", "!lib/"];
+        let k = vec!["lib/", "!/lib/"];
+
+        assert!(ig.ignores(a, ig.root.join("lib/include.js")));
+        assert!(ig.ignores(b, ig.root.join("lib/include.js")));
+        assert!(ig.ignores(c, ig.root.join("lib/include.js")));
+
+        assert!(!ig.ignores(i, ig.root.join("lib/include.js")));
+        assert!(!ig.ignores(j, ig.root.join("lib/include.js")));
+        assert!(!ig.ignores(k, ig.root.join("lib/include.js")));
     }
 }
