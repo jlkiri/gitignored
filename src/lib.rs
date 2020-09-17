@@ -13,6 +13,11 @@ fn has_no_middle_separators(string: &str) -> bool {
     non_empty.len() <= 1
 }
 
+fn first_segment(string: &str) -> &str {
+    let segments: Vec<&str> = string.split("/").collect();
+    segments.first().unwrap()
+}
+
 #[derive(Debug)]
 enum Match {
     Anywhere,
@@ -27,7 +32,7 @@ enum Extension {
 
 #[derive(Debug)]
 enum PathKind {
-    Directory,
+    Dir,
     File,
     Both,
 }
@@ -42,7 +47,7 @@ pub struct Pattern {
 
 impl Pattern {
     pub fn new<P: AsRef<Path>>(glob: P) -> Self {
-        let has_extension = Regex::new(r"\*\..+?$").unwrap();
+        let has_extension = Regex::new(r"\*\.[^\*]+$").unwrap();
         let glob = glob.as_ref().to_str().unwrap_or("");
         let negated = glob.starts_with("!");
         let normalized_glob = if negated { &glob[1..] } else { glob };
@@ -55,16 +60,18 @@ impl Pattern {
         } else {
             Match::Relative
         };
+
         let extension_type = if has_extension.is_match(normalized_glob) {
             Extension::Defined
         } else {
             Extension::Undefined
         };
+
         let path_kind = match extension_type {
             Extension::Defined => PathKind::File,
             Extension::Undefined => {
                 if normalized_glob.ends_with("/") {
-                    PathKind::Directory
+                    PathKind::Dir
                 } else {
                     PathKind::Both
                 }
@@ -131,18 +138,14 @@ impl<P: AsRef<Path>> Gitignore<P> {
         format!("{}{}", "**/", unformatted)
     }
 
-    pub fn ignores(&mut self, glob: impl AsRef<Path>, target: impl AsRef<Path>) -> bool {
-        let glob = Pattern::new(glob);
-
-        let full_path = match (&glob.path_kind, &glob.match_type) {
+    pub fn ignores_path(&mut self, glob: Pattern, target: impl AsRef<Path>) -> bool {
+        let full_path = match (glob.path_kind, glob.match_type) {
             (PathKind::Both, Match::Anywhere) => self.make_absolute_anywhere(&glob.string) + "*",
             (PathKind::File, Match::Anywhere) => self.make_absolute_anywhere(&glob.string),
-            (PathKind::Directory, Match::Anywhere) => {
-                self.make_absolute_anywhere(&glob.string) + "**/*"
-            }
+            (PathKind::Dir, Match::Anywhere) => self.make_absolute_anywhere(&glob.string) + "**/*",
             (PathKind::Both, Match::Relative) => self.make_absolute(&glob.string) + "*",
             (PathKind::File, Match::Relative) => self.make_absolute(&glob.string),
-            (PathKind::Directory, Match::Relative) => self.make_absolute(&glob.string) + "**/*",
+            (PathKind::Dir, Match::Relative) => self.make_absolute(&glob.string) + "**/*",
         };
 
         let matcher = PatternMatcher::new(&full_path).unwrap();
@@ -152,6 +155,49 @@ impl<P: AsRef<Path>> Gitignore<P> {
         } else {
             matcher.matches_path_with(target.as_ref(), self.options)
         }
+    }
+
+    pub fn ignores(&mut self, text: &str, target: impl AsRef<Path>) -> bool {
+        let lines: Vec<&str> = text.lines().collect();
+
+        let mut ignored_dirs: Vec<String> = Vec::new();
+
+        for line in &lines {
+            let glob = Pattern::new(line);
+            let Pattern {
+                path_kind,
+                match_type,
+                ..
+            } = &glob;
+
+            if !glob.negated {
+                match (path_kind, match_type) {
+                    (PathKind::Both, Match::Anywhere) | (PathKind::Dir, Match::Anywhere) => {
+                        println!("{}", first_segment(&glob.string));
+                        ignored_dirs.push(String::from(first_segment(&glob.string)));
+                    }
+                    _ => (),
+                }
+            }
+        }
+
+        let mut is_ignored = false;
+
+        for line in &lines {
+            let glob = Pattern::new(line);
+            if !glob.negated
+                && ignored_dirs.contains(&String::from(first_segment(
+                    target.as_ref().to_str().unwrap(),
+                )))
+            {
+                is_ignored = true;
+                break;
+            } else {
+                is_ignored = self.ignores_path(glob, target.as_ref());
+            }
+        }
+
+        is_ignored
     }
 }
 
