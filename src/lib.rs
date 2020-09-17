@@ -155,14 +155,7 @@ impl<P: AsRef<Path>> Gitignore<P> {
     }
 
     pub fn ignores_path(&mut self, glob: Pattern, target: impl AsRef<Path>) -> bool {
-        let full_path = match (glob.path_kind, glob.match_type) {
-            (PathKind::Both, Match::Anywhere) => self.make_absolute_anywhere(&glob.string) + "*",
-            (PathKind::File, Match::Anywhere) => self.make_absolute_anywhere(&glob.string),
-            (PathKind::Dir, Match::Anywhere) => self.make_absolute_anywhere(&glob.string) + "**/*",
-            (PathKind::Both, Match::Relative) => self.make_absolute(&glob.string) + "*",
-            (PathKind::File, Match::Relative) => self.make_absolute(&glob.string),
-            (PathKind::Dir, Match::Relative) => self.make_absolute(&glob.string) + "**/*",
-        };
+        let full_path = self.make_full_path(&glob);
 
         let matcher = PatternMatcher::new(&full_path).unwrap();
 
@@ -173,10 +166,19 @@ impl<P: AsRef<Path>> Gitignore<P> {
         }
     }
 
+    fn make_full_path(&mut self, glob: &Pattern) -> String {
+        match (&glob.path_kind, &glob.match_type) {
+            (PathKind::Both, Match::Anywhere) => self.make_absolute_anywhere(&glob.string) + "*",
+            (PathKind::File, Match::Anywhere) => self.make_absolute_anywhere(&glob.string),
+            (PathKind::Dir, Match::Anywhere) => self.make_absolute_anywhere(&glob.string) + "**/*",
+            (PathKind::Both, Match::Relative) => self.make_absolute(&glob.string) + "*",
+            (PathKind::File, Match::Relative) => self.make_absolute(&glob.string),
+            (PathKind::Dir, Match::Relative) => self.make_absolute(&glob.string) + "**/*",
+        }
+    }
+
     pub fn ignores(&mut self, lines: &[&str], target: impl AsRef<Path>) -> bool {
         let mut ignored_dirs: Vec<String> = Vec::new();
-
-        let matcher = PatternMatcher::new("/lib/**/*").unwrap();
 
         for line in lines.iter() {
             let glob = Pattern::new(line);
