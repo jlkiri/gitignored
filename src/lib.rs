@@ -16,28 +16,6 @@ fn has_no_middle_separators(string: &str) -> bool {
     segments.len() <= 1
 }
 
-fn first_segment(string: &str) -> String {
-    let normalized = if string.starts_with("/") {
-        &string[1..]
-    } else {
-        string
-    };
-    let segments: Vec<&str> = normalized.split("/").collect();
-
-    String::from(*segments.first().unwrap())
-}
-
-fn last_segment(string: &str) -> String {
-    let normalized = if string.ends_with("/") {
-        &string[..string.len() - 1]
-    } else {
-        string
-    };
-    let segments: Vec<&str> = normalized.split("/").collect();
-
-    String::from(*segments.last().unwrap())
-}
-
 fn remove_whitespace(s: &str) -> String {
     s.chars().filter(|c| !c.is_whitespace()).collect()
 }
