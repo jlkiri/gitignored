@@ -183,10 +183,11 @@ impl<P: AsRef<Path>> Gitignore<P> {
                 ..
             } = &glob;
 
+            // Disallow re-include by negation if parent dir is ignored unless the same parent is negated, with or without /
             match (path_kind, match_type) {
                 (PathKind::Both, Match::Anywhere) | (PathKind::Dir, Match::Anywhere) => {
-                    let neg = &negate(&glob.string)[..];
-                    let neg_with_root = &negate(&format!("/{}", &glob.string))[..];
+                    let neg = &negate(string)[..];
+                    let neg_with_root = &negate(&format!("/{}", string))[..];
 
                     if !glob.negated && !lines.contains(&neg) && !lines.contains(&neg_with_root) {
                         ignored_dirs.push(first_segment(string));
@@ -209,12 +210,11 @@ impl<P: AsRef<Path>> Gitignore<P> {
             let has_ignored_parent =
                 ignored_dirs.contains(&first_segment(unprefixed.to_str().unwrap()));
 
-            if !glob.negated && has_ignored_parent {
-                is_ignored = true;
-                break;
-            } else {
-                is_ignored = self.ignores_path(glob, target.as_ref());
+            if has_ignored_parent {
+                return true;
             }
+
+            is_ignored = self.ignores_path(glob, target.as_ref());
         }
 
         is_ignored
