@@ -1,3 +1,7 @@
+//! # Gitignored
+//!
+//! `gitignored` is a Rust implementation of gitignore algorithm. Compliant with the format defined [here](https://git-scm.com/docs/gitignore).
+
 use glob::{MatchOptions, Pattern as PatternMatcher};
 use regex::Regex;
 use std::env;
@@ -33,6 +37,7 @@ enum PathKind {
     Both,
 }
 
+/// Represents a glob pattern and meta information about it.
 pub struct Pattern {
     pub string: String,
     match_type: Match,
@@ -41,6 +46,11 @@ pub struct Pattern {
 }
 
 impl Pattern {
+    /// Creates a new Pattern that can be passed to <a href="/struct.Gitignore.html#method.ignores_path">ignores_path</a>.
+    /// Example:
+    /// ```
+    /// let ptn = Pattern::new("**/dist/*.js");
+    /// ```
     pub fn new<P: AsRef<Path>>(glob: P) -> Self {
         let has_extension = Regex::new(r"\*\.[^\*]+$").unwrap();
         let glob = glob.as_ref().to_str().unwrap_or("");
@@ -75,7 +85,7 @@ impl Pattern {
         }
     }
 
-    pub fn get_parents(&self) -> Vec<String> {
+    fn get_parents(&self) -> Vec<String> {
         let mut segments: Vec<&str> = self.string.split("/").collect();
         let mut parents: Vec<String> = Vec::new();
         while segments.len() > 1 {
@@ -94,12 +104,15 @@ impl Pattern {
     }
 }
 
+/// Used to match globs against user-provided paths.
 pub struct Gitignore<P: AsRef<Path>> {
+    /// Current working directory if created with `Gitignore::default()`.
     root: P,
     options: MatchOptions,
 }
 
 impl Default for Gitignore<PathBuf> {
+    /// Creates a new instance using current working directory.
     fn default() -> Self {
         let mut options = MatchOptions::new();
         options.require_literal_separator = false;
@@ -112,6 +125,15 @@ impl Default for Gitignore<PathBuf> {
 }
 
 impl<P: AsRef<Path>> Gitignore<P> {
+    /// Creates a new instance. Requires a path that serves as a root for all path calculations and
+    /// matching options as defined in the <a href="https://docs.rs/glob/0.3.0/glob/">glob</a> crate.
+    /// # Examples
+    ///
+    /// ```
+    /// let options = MatchOptions::new();
+    /// let cwd = env::current_dir().unwrap();
+    /// let ig = Gitignore::new(cwd, options);
+    /// ```
     pub fn new(root: P, options: MatchOptions) -> Gitignore<P> {
         Gitignore { root, options }
     }
@@ -144,6 +166,16 @@ impl<P: AsRef<Path>> Gitignore<P> {
         format!("{}{}", "**/", unformatted)
     }
 
+    /// Checks if the target is ignored by a single glob.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert!(ig.ignores_path(
+    ///    Pattern::new("**/dist/*.js"),
+    ///    ig.root.join("build/dist/lib.js")
+    /// ));
+    /// ```
     pub fn ignores_path(&mut self, glob: Pattern, target: impl AsRef<Path>) -> bool {
         let full_path = self.make_full_path(&glob, &glob.string);
 
@@ -190,6 +222,14 @@ impl<P: AsRef<Path>> Gitignore<P> {
         ignored_dirs
     }
 
+    /// Checks if the target is ignored by provided list of gitignore patterns.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let globs = vec!["lib/*.js", "!lib/include.js"];
+    /// assert!(!ig.ignores(&globs, ig.root.join("lib/include.js")));
+    /// ```
     pub fn ignores(&mut self, lines: &[&str], target: impl AsRef<Path>) -> bool {
         let ignored_dirs = self.find_ignored_dirs(lines);
 
