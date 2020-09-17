@@ -171,7 +171,7 @@ impl<P: AsRef<Path>> Gitignore<P> {
         }
     }
 
-    pub fn ignores(&mut self, lines: Vec<&str>, target: impl AsRef<Path>) -> bool {
+    pub fn ignores(&mut self, lines: &[&str], target: impl AsRef<Path>) -> bool {
         let mut ignored_dirs: Vec<String> = Vec::new();
 
         for line in lines.iter() {
@@ -288,14 +288,15 @@ mod tests {
         let i = vec!["lib/*.js", "!lib/include.js"];
         let j = vec!["lib/*.js", "!lib/"];
         let k = vec!["lib/", "!lib/"];
-        let k = vec!["lib/", "!/lib/"];
+        let l = vec!["lib/", "!/lib/"];
 
-        assert!(ig.ignores(a, ig.root.join("lib/include.js")));
-        assert!(ig.ignores(b, ig.root.join("lib/include.js")));
-        assert!(ig.ignores(c, ig.root.join("lib/include.js")));
+        assert!(ig.ignores(&a, ig.root.join("lib/include.js")));
+        assert!(ig.ignores(&b, ig.root.join("lib/include.js")));
+        assert!(ig.ignores(&c, ig.root.join("lib/include.js")));
 
-        assert!(!ig.ignores(i, ig.root.join("lib/include.js")));
-        assert!(!ig.ignores(j, ig.root.join("lib/include.js")));
-        assert!(!ig.ignores(k, ig.root.join("lib/include.js")));
+        assert!(!ig.ignores(&i, ig.root.join("lib/include.js")));
+        assert!(!ig.ignores(&j, ig.root.join("lib/include.js")));
+        assert!(!ig.ignores(&k, ig.root.join("lib/include.js")));
+        assert!(!ig.ignores(&l, ig.root.join("lib/include.js")));
     }
 }
