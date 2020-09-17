@@ -27,12 +27,6 @@ enum Match {
 }
 
 #[derive(Debug)]
-enum Extension {
-    Defined,
-    Undefined,
-}
-
-#[derive(Debug)]
 enum PathKind {
     Dir,
     File,
@@ -42,7 +36,6 @@ enum PathKind {
 pub struct Pattern {
     pub string: String,
     match_type: Match,
-    extension_type: Extension,
     path_kind: PathKind,
     negated: bool,
 }
@@ -64,20 +57,13 @@ impl Pattern {
             Match::Relative
         };
 
-        let extension_type = if has_extension.is_match(&normalized_glob) {
-            Extension::Defined
+        let path_kind = if has_extension.is_match(&normalized_glob) {
+            PathKind::File
         } else {
-            Extension::Undefined
-        };
-
-        let path_kind = match extension_type {
-            Extension::Defined => PathKind::File,
-            Extension::Undefined => {
-                if normalized_glob.ends_with("/") {
-                    PathKind::Dir
-                } else {
-                    PathKind::Both
-                }
+            if normalized_glob.ends_with("/") {
+                PathKind::Dir
+            } else {
+                PathKind::Both
             }
         };
 
@@ -85,7 +71,6 @@ impl Pattern {
             string: String::from(normalized_glob),
             negated,
             match_type,
-            extension_type,
             path_kind,
         }
     }
