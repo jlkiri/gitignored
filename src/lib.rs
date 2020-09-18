@@ -107,7 +107,7 @@ impl Pattern {
 /// Used to match globs against user-provided paths.
 pub struct Gitignore<P: AsRef<Path>> {
     /// Current working directory if created with `Gitignore::default()`.
-    root: P,
+    pub root: P,
     options: MatchOptions,
 }
 
