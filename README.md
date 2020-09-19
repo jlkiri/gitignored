@@ -4,4 +4,4 @@
 
 ## Documentation
 
-Read docs here: https://docs.rs/gitignored/0.2.1/gitignored/
+Read docs here: https://docs.rs/gitignored/0.3.1/gitignored/
