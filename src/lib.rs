@@ -52,7 +52,7 @@ impl Pattern {
     /// let ptn = Pattern::new("**/dist/*.js");
     /// ```
     pub fn new<P: AsRef<Path>>(glob: P) -> Self {
-        let has_extension = Regex::new(r"\*\.[^\*]+$").unwrap();
+        let has_extension = Regex::new(r"\.[^\*/\\]+$").unwrap();
         let glob = glob.as_ref().to_str().unwrap_or("");
         let negated = glob.starts_with("!");
         let without_neg = if negated { &glob[1..] } else { glob };
@@ -138,65 +138,58 @@ impl<P: AsRef<Path>> Gitignore<P> {
         Gitignore { root, options }
     }
 
-    fn make_absolute(&mut self, p: &str) -> String {
+    fn make_relative(&mut self, p: &str) -> String {
         self.options.require_literal_separator = true;
 
         let root_str = self.root.as_ref().display();
-
-        if p.starts_with("**/") {
-            return String::from(p);
-        }
-
-        if p.starts_with("/") {
-            return format!("{}{}", root_str, p);
-        }
-
-        format!("{}/{}", root_str, p)
-    }
-
-    fn make_absolute_anywhere(&mut self, p: &str) -> String {
-        self.options.require_literal_separator = false;
-
         let mut unformatted = p;
 
         if unformatted.ends_with("*") {
             unformatted = &p[..p.len() - 1];
         }
 
-        format!("{}{}", "**/", unformatted)
+        if p.starts_with("**/") {
+            return String::from(unformatted);
+        }
+
+        if p.starts_with("/") {
+            return format!("{}{}", root_str, unformatted);
+        }
+
+        format!("{}/{}", root_str, unformatted)
     }
 
-    /// Checks if the target is ignored by a single glob.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// assert!(ig.ignores_path(
-    ///    Pattern::new("**/dist/*.js"),
-    ///    ig.root.join("build/dist/lib.js")
-    /// ));
-    /// ```
-    pub fn ignores_path(&mut self, glob: Pattern, target: impl AsRef<Path>) -> bool {
-        let full_path = self.make_full_path(&glob, &glob.string);
+    fn make_matchable_anywhere(&mut self, p: &str) -> String {
+        self.options.require_literal_separator = false;
 
-        let matcher = PatternMatcher::new(&full_path).unwrap();
+        let mut unformatted = p;
+        let root_str = self.root.as_ref().display();
 
-        if glob.negated {
-            !matcher.matches_path_with(target.as_ref(), self.options)
-        } else {
-            matcher.matches_path_with(target.as_ref(), self.options)
+        if unformatted.ends_with("*") {
+            unformatted = &p[..p.len() - 1];
         }
+
+        format!("{}{}{}", root_str, "/**/", unformatted)
     }
 
     fn make_full_path<A: AsRef<Path>>(&mut self, glob: &Pattern, from: A) -> String {
         let from_string = from.as_ref().to_str().unwrap();
         match (&glob.path_kind, &glob.match_type) {
-            (PathKind::Both, Match::Anywhere) => self.make_absolute_anywhere(from_string) + "*",
-            (PathKind::File, Match::Anywhere) => self.make_absolute_anywhere(from_string),
-            (PathKind::Dir, Match::Anywhere) => self.make_absolute_anywhere(from_string) + "**/*",
-            (PathKind::Both, Match::Relative) => self.make_absolute(from_string) + "*",
-            (PathKind::File, Match::Relative) => self.make_absolute(from_string),
-            (PathKind::Dir, Match::Relative) => self.make_absolute(from_string) + "**/*",
+            (PathKind::Both, Match::Anywhere) => self.make_matchable_anywhere(from_string) + "*",
+            (PathKind::File, Match::Anywhere) => self.make_matchable_anywhere(from_string),
+            (PathKind::Dir, Match::Anywhere) => self.make_matchable_anywhere(from_string) + "**/*",
+            (PathKind::Both, Match::Relative) => self.make_relative(from_string) + "*",
+            (PathKind::File, Match::Relative) => self.make_relative(from_string),
+            (PathKind::Dir, Match::Relative) => self.make_relative(from_string) + "**/*",
+        }
+    }
+
+    fn make_relative_to_root<A: AsRef<Path>>(&mut self, glob: &Pattern, from: A) -> String {
+        let from_string = from.as_ref().to_str().unwrap();
+        match (&glob.path_kind, &glob.match_type) {
+            (PathKind::Both, _) => self.make_relative(from_string) + "*",
+            (PathKind::File, _) => self.make_relative(from_string),
+            (PathKind::Dir, _) => self.make_relative(from_string) + "**/*",
         }
     }
 
@@ -239,9 +232,9 @@ impl<P: AsRef<Path>> Gitignore<P> {
             let glob = Pattern::new(line);
 
             let has_ignored_parent = ignored_dirs.iter().any(|dir| {
-                let long_glob = self.make_full_path(&glob, dir);
+                let long_glob = self.make_relative_to_root(&glob, dir);
                 let matcher = PatternMatcher::new(&long_glob).unwrap();
-                matcher.matches_path(target.as_ref())
+                matcher.matches_path_with(target.as_ref(), self.options)
             });
 
             // Early return because nothing can re-include it
@@ -249,7 +242,16 @@ impl<P: AsRef<Path>> Gitignore<P> {
                 return true;
             }
 
-            is_ignored = self.ignores_path(glob, target.as_ref());
+            // Avoid being re-included by irrelevant globs
+            if is_ignored && !glob.negated {
+                return true;
+            }
+
+            let full_path = self.make_full_path(&glob, &glob.string);
+            let matcher = PatternMatcher::new(&full_path).unwrap();
+            let is_match = matcher.matches_path_with(target.as_ref(), self.options);
+
+            is_ignored = if is_match { !glob.negated } else { is_ignored };
         }
 
         is_ignored
@@ -261,58 +263,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn single_line() {
-        let mut ig = Gitignore::default();
-
-        assert!(ig.ignores_path(
-            Pattern::new("**/dist/*.js"),
-            ig.root.join("build/dist/lib.js")
-        ));
-        assert!(ig.ignores_path(
-            Pattern::new("/**/dist/*.js"),
-            ig.root.join("build/dist/lib.js")
-        ));
-        assert!(ig.ignores_path(
-            Pattern::new("/dist/**/*.js"),
-            ig.root.join("dist/types/types.js")
-        ));
-
-        assert!(ig.ignores_path(Pattern::new("/lib.js"), ig.root.join("lib.js")));
-        assert!(ig.ignores_path(Pattern::new("lib/*.js"), ig.root.join("lib/module.js")));
-        assert!(ig.ignores_path(Pattern::new("/lib/"), ig.root.join("lib/module.js")));
-        assert!(ig.ignores_path(Pattern::new("lib/"), ig.root.join("lib/module.js")));
-        assert!(ig.ignores_path(Pattern::new("lib/"), ig.root.join("dist/lib/module.js")));
-        assert!(ig.ignores_path(Pattern::new("lib/"), ig.root.join("lib/nested/module.js")));
-        assert!(ig.ignores_path(Pattern::new("lib"), ig.root.join("lib/nested/module.js")));
-        assert!(ig.ignores_path(Pattern::new("lib"), ig.root.join("lib")));
-        assert!(ig.ignores_path(Pattern::new("lib"), ig.root.join("lib/module.js")));
-
-        assert!(ig.ignores_path(Pattern::new("remove-*"), ig.root.join("remove-items.js")));
-        assert!(ig.ignores_path(Pattern::new("/*.js"), ig.root.join("module.js")));
-        assert!(ig.ignores_path(Pattern::new("!/lib.js"), ig.root.join("lib/lib.js")));
-        assert!(ig.ignores_path(
-            Pattern::new("!lib/*.js"),
-            ig.root.join("dist/lib/module.js")
-        ));
-        assert!(ig.ignores_path(Pattern::new("*.js"), ig.root.join("dist/module.js")));
-        assert!(ig.ignores_path(Pattern::new("*.js"), ig.root.join("module.js")));
-
-        assert!(!ig.ignores_path(Pattern::new("!/*.js"), ig.root.join("module.js")));
-        assert!(!ig.ignores_path(Pattern::new("/lib.js"), ig.root.join("lib/lib.js")));
-        assert!(!ig.ignores_path(
-            Pattern::new("/dist/*.js"),
-            ig.root.join("dist/types/types.js")
-        ));
-        assert!(!ig.ignores_path(Pattern::new("lib/*.js"), ig.root.join("dist/lib/module.js")));
-        assert!(!ig.ignores_path(
-            Pattern::new("dist/lib/"),
-            ig.root.join("parent/dist/lib/module.js")
-        ));
-        assert!(!ig.ignores_path(Pattern::new("!lib/"), ig.root.join("dist/lib/module.js")));
-        assert!(!ig.ignores_path(Pattern::new("!lib"), ig.root.join("dist/lib/module.js")));
-    }
-
-    #[test]
     fn multiple_lines() {
         let mut ig = Gitignore::default();
 
@@ -321,7 +271,9 @@ mod tests {
         let c = vec!["!lib/*.js", "lib"];
         let d = vec!["lib/", "!lib/deep/include.js"];
         let e = vec!["/lib/", "!/lib/deep/"];
+
         let f = vec!["lib/", "!/lib/"];
+
         let g = vec!["!/lib/", "lib/"];
         let h = vec!["**/remove-items.js"];
         let i = vec!["remove-items*"];
@@ -332,22 +284,29 @@ mod tests {
         let m = vec!["lib/", "!lib/"];
         let n = vec!["lib/", "!/lib/"];
 
+        let o = vec!["*.js", "!lib.js"];
+        let p = vec!["src/*.js", "target/"];
+
         assert!(ig.ignores(&a, ig.root.join("lib/include.js")));
-        assert!(ig.ignores(&b, ig.root.join("lib/include.js")));
+
         assert!(ig.ignores(&c, ig.root.join("lib/include.js")));
         assert!(ig.ignores(&d, ig.root.join("lib/deep/include.js")));
         assert!(ig.ignores(&e, ig.root.join("lib/deep/include.js")));
-        assert!(ig.ignores(&f, ig.root.join("deep/lib/include.js")));
+
         assert!(ig.ignores(&g, ig.root.join("deep/lib/include.js")));
         assert!(ig.ignores(&h, ig.root.join("deep/lib/remove-items.js")));
         assert!(ig.ignores(&i, ig.root.join("deep/lib/remove-items.js")));
+        assert!(ig.ignores(&p, ig.root.join("src/lib.js")));
 
         assert!(!ig.ignores(&j, ig.root.join("deep/lib/remove-items.js")));
         assert!(!ig.ignores(&k, ig.root.join("lib/include.js")));
         assert!(!ig.ignores(&l, ig.root.join("lib/include.js")));
         assert!(!ig.ignores(&m, ig.root.join("lib/include.js")));
         assert!(!ig.ignores(&n, ig.root.join("lib/include.js")));
+        assert!(!ig.ignores(&o, ig.root.join("src/lib.js")));
+        assert!(!ig.ignores(&b, ig.root.join("lib/include.js")));
 
         assert!(ig.ignores(&d, ig.root.join("lib/deep/ignored.js")));
+        assert!(ig.ignores(&f, ig.root.join("deep/lib/include.js")));
     }
 }

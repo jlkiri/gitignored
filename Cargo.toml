@@ -1,6 +1,6 @@
 [package]
 name = "gitignored"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Kirill Vasiltsov <interalia.dev@gmail.com>"]
 edition = "2018"
 readme = "README.md"
@@ -14,3 +14,7 @@ keywords = ["git", "gitignore"]
 [dependencies]
 glob = "0.3.0"
 regex = "1"
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"
