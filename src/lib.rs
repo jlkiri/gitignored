@@ -2,7 +2,7 @@
 //!
 //! `gitignored` is a Rust implementation of gitignore algorithm. Compliant with the format defined [here](https://git-scm.com/docs/gitignore).
 
-use globset;
+use globset::GlobBuilder;
 use regex::Regex;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -51,9 +51,8 @@ impl Pattern {
     /// ```
     /// let ptn = Pattern::new("**/dist/*.js");
     /// ```
-    pub fn new<P: AsRef<Path>>(glob: P) -> Self {
+    pub fn new(glob: &str) -> Self {
         let has_extension = Regex::new(r"\.[^\*/\\]+$").unwrap();
-        let glob = glob.as_ref().to_str().unwrap_or("");
         let negated = glob.starts_with("!");
         let without_neg = if negated { &glob[1..] } else { glob };
         let normalized_glob = remove_whitespace(without_neg);
@@ -170,24 +169,22 @@ impl<P: AsRef<Path>> Gitignore<P> {
         format!("{}{}{}", root_str, "/**/", unformatted)
     }
 
-    fn make_full_path<A: AsRef<Path>>(&mut self, glob: &Pattern, from: A) -> String {
-        let from_string = from.as_ref().to_str().unwrap();
+    fn make_full_path(&mut self, glob: &Pattern, from: &str) -> String {
         match (&glob.path_kind, &glob.match_type) {
-            (PathKind::Both, Match::Anywhere) => self.make_matchable_anywhere(from_string) + "*",
-            (PathKind::File, Match::Anywhere) => self.make_matchable_anywhere(from_string),
-            (PathKind::Dir, Match::Anywhere) => self.make_matchable_anywhere(from_string) + "**/*",
-            (PathKind::Both, Match::Relative) => self.make_relative(from_string) + "*",
-            (PathKind::File, Match::Relative) => self.make_relative(from_string),
-            (PathKind::Dir, Match::Relative) => self.make_relative(from_string) + "**/*",
+            (PathKind::Both, Match::Anywhere) => self.make_matchable_anywhere(from) + "*",
+            (PathKind::File, Match::Anywhere) => self.make_matchable_anywhere(from),
+            (PathKind::Dir, Match::Anywhere) => self.make_matchable_anywhere(from) + "**/*",
+            (PathKind::Both, Match::Relative) => self.make_relative(from) + "*",
+            (PathKind::File, Match::Relative) => self.make_relative(from),
+            (PathKind::Dir, Match::Relative) => self.make_relative(from) + "**/*",
         }
     }
 
-    fn make_relative_to_root<A: AsRef<Path>>(&mut self, glob: &Pattern, from: A) -> String {
-        let from_string = from.as_ref().to_str().unwrap();
+    fn make_relative_to_root(&mut self, glob: &Pattern, from: &str) -> String {
         match (&glob.path_kind, &glob.match_type) {
-            (PathKind::Both, _) => self.make_relative(from_string) + "*",
-            (PathKind::File, _) => self.make_relative(from_string),
-            (PathKind::Dir, _) => self.make_relative(from_string) + "**/*",
+            (PathKind::Both, _) => self.make_relative(from) + "*",
+            (PathKind::File, _) => self.make_relative(from),
+            (PathKind::Dir, _) => self.make_relative(from) + "**/*",
         }
     }
 
@@ -231,7 +228,7 @@ impl<P: AsRef<Path>> Gitignore<P> {
 
             let has_ignored_parent = ignored_dirs.iter().any(|dir| {
                 let long_glob = self.make_relative_to_root(&glob, dir);
-                let matcher = globset::GlobBuilder::new(&long_glob)
+                let matcher = GlobBuilder::new(&long_glob)
                     .literal_separator(self.require_literal_separator)
                     .build()
                     .unwrap()
@@ -250,12 +247,11 @@ impl<P: AsRef<Path>> Gitignore<P> {
             }
 
             let full_path = self.make_full_path(&glob, &glob.string);
-            let matcher = globset::GlobBuilder::new(&full_path)
+            let matcher = GlobBuilder::new(&full_path)
                 .literal_separator(self.require_literal_separator)
                 .build()
                 .unwrap()
                 .compile_matcher();
-            println!("{}", matcher.glob());
             let is_match = matcher.is_match(target.as_ref());
 
             is_ignored = if is_match { !glob.negated } else { is_ignored };
