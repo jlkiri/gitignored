@@ -12,7 +12,7 @@ keywords = ["git", "gitignore"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-glob = "0.3.0"
+globset = "0.4.5"
 regex = "1"
 walkdir = "2"
 

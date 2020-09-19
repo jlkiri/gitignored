@@ -2,7 +2,7 @@
 //!
 //! `gitignored` is a Rust implementation of gitignore algorithm. Compliant with the format defined [here](https://git-scm.com/docs/gitignore).
 
-use glob::{MatchOptions, Pattern as PatternMatcher};
+use globset;
 use regex::Regex;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -108,18 +108,15 @@ impl Pattern {
 pub struct Gitignore<P: AsRef<Path>> {
     /// Current working directory if created with `Gitignore::default()`.
     pub root: P,
-    options: MatchOptions,
+    require_literal_separator: bool,
 }
 
 impl Default for Gitignore<PathBuf> {
     /// Creates a new instance using current working directory.
     fn default() -> Self {
-        let mut options = MatchOptions::new();
-        options.require_literal_separator = false;
-
         Self {
             root: env::current_dir().unwrap(),
-            options,
+            require_literal_separator: true,
         }
     }
 }
@@ -134,13 +131,15 @@ impl<P: AsRef<Path>> Gitignore<P> {
     /// let cwd = env::current_dir().unwrap();
     /// let ig = Gitignore::new(cwd, options);
     /// ```
-    pub fn new(root: P, options: MatchOptions) -> Gitignore<P> {
-        Gitignore { root, options }
+    pub fn new(root: P) -> Gitignore<P> {
+        Gitignore {
+            root,
+            require_literal_separator: true,
+        }
     }
 
     fn make_relative(&mut self, p: &str) -> String {
-        self.options.require_literal_separator = true;
-
+        self.require_literal_separator = true;
         let root_str = self.root.as_ref().display();
         let mut unformatted = p;
 
@@ -160,8 +159,7 @@ impl<P: AsRef<Path>> Gitignore<P> {
     }
 
     fn make_matchable_anywhere(&mut self, p: &str) -> String {
-        self.options.require_literal_separator = false;
-
+        self.require_literal_separator = false;
         let mut unformatted = p;
         let root_str = self.root.as_ref().display();
 
@@ -233,8 +231,12 @@ impl<P: AsRef<Path>> Gitignore<P> {
 
             let has_ignored_parent = ignored_dirs.iter().any(|dir| {
                 let long_glob = self.make_relative_to_root(&glob, dir);
-                let matcher = PatternMatcher::new(&long_glob).unwrap();
-                matcher.matches_path_with(target.as_ref(), self.options)
+                let matcher = globset::GlobBuilder::new(&long_glob)
+                    .literal_separator(self.require_literal_separator)
+                    .build()
+                    .unwrap()
+                    .compile_matcher();
+                matcher.is_match(target.as_ref())
             });
 
             // Early return because nothing can re-include it
@@ -248,8 +250,13 @@ impl<P: AsRef<Path>> Gitignore<P> {
             }
 
             let full_path = self.make_full_path(&glob, &glob.string);
-            let matcher = PatternMatcher::new(&full_path).unwrap();
-            let is_match = matcher.matches_path_with(target.as_ref(), self.options);
+            let matcher = globset::GlobBuilder::new(&full_path)
+                .literal_separator(self.require_literal_separator)
+                .build()
+                .unwrap()
+                .compile_matcher();
+            println!("{}", matcher.glob());
+            let is_match = matcher.is_match(target.as_ref());
 
             is_ignored = if is_match { !glob.negated } else { is_ignored };
         }
