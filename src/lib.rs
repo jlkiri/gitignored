@@ -108,6 +108,7 @@ pub struct Gitignore<P: AsRef<Path>> {
     /// Current working directory if created with `Gitignore::default()`.
     pub root: P,
     require_literal_separator: bool,
+    case_insensitive: bool,
 }
 
 impl Default for Gitignore<PathBuf> {
@@ -116,6 +117,7 @@ impl Default for Gitignore<PathBuf> {
         Self {
             root: env::current_dir().unwrap(),
             require_literal_separator: true,
+            case_insensitive: true,
         }
     }
 }
@@ -126,14 +128,14 @@ impl<P: AsRef<Path>> Gitignore<P> {
     /// # Examples
     ///
     /// ```
-    /// let options = MatchOptions::new();
     /// let cwd = env::current_dir().unwrap();
-    /// let ig = Gitignore::new(cwd, options);
+    /// let ig = Gitignore::new(cwd, true, true);
     /// ```
-    pub fn new(root: P) -> Gitignore<P> {
+    pub fn new(root: P, require_literal_separator: bool, case_insensitive: bool) -> Gitignore<P> {
         Gitignore {
             root,
-            require_literal_separator: true,
+            require_literal_separator,
+            case_insensitive,
         }
     }
 
@@ -230,6 +232,7 @@ impl<P: AsRef<Path>> Gitignore<P> {
                 let long_glob = self.make_relative_to_root(&glob, dir);
                 let matcher = GlobBuilder::new(&long_glob)
                     .literal_separator(self.require_literal_separator)
+                    .case_insensitive(self.case_insensitive)
                     .build()
                     .unwrap()
                     .compile_matcher();
@@ -249,6 +252,7 @@ impl<P: AsRef<Path>> Gitignore<P> {
             let full_path = self.make_full_path(&glob, &glob.string);
             let matcher = GlobBuilder::new(&full_path)
                 .literal_separator(self.require_literal_separator)
+                .case_insensitive(self.case_insensitive)
                 .build()
                 .unwrap()
                 .compile_matcher();
